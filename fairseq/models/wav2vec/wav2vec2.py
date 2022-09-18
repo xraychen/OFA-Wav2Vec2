@@ -34,6 +34,7 @@ from fairseq.modules.transformer_sentence_encoder import init_bert_params
 from fairseq.utils import buffered_arange, index_put, is_xla_tensor
 
 from .utils import pad_to_multiple
+from .utils import Subsampler, CIF
 
 EXTRACTOR_MODE_CHOICES = ChoiceEnum(["default", "layer_norm"])
 MASKING_DISTRIBUTION_CHOICES = ChoiceEnum(["static", "uniform", "normal", "poisson"])
@@ -289,6 +290,11 @@ class Wav2Vec2Config(FairseqDataclass):
     )
     fp16: bool = field(default=False, metadata={"help": "If fp16 is being used"})
 
+    # Subsampling
+    subsample: str = field(default="none", metadata={"help": "subsample method: none, fixed, cif"})
+    fixed_subsample_ratio: int = field(default=4)
+    # use_cif: bool = field(default=False)
+
 
 @register_model("wav2vec2", dataclass=Wav2Vec2Config)
 class Wav2Vec2Model(BaseFairseqModel):
@@ -345,6 +351,17 @@ class Wav2Vec2Model(BaseFairseqModel):
         self.logit_temp = cfg.logit_temp
 
         final_dim = cfg.final_dim if cfg.final_dim > 0 else cfg.encoder_embed_dim
+
+        # subsample
+        if cfg.subsample == "none":
+            self.subsampler = nn.Identity()
+        elif cfg.subsample == "fixed":
+            self.subsampler = Subsampler()
+        elif cfg.subsample == "cif":
+            self.subsampler = None
+            self.cif_subsampler = CIF()
+        else:
+            raise NotImplementedError
 
         if cfg.quantize_targets:
             vq_dim = cfg.latent_dim if cfg.latent_dim > 0 else final_dim
@@ -632,6 +649,19 @@ class Wav2Vec2Model(BaseFairseqModel):
             if padding_mask is not None:
                 padding_mask = padding_mask[:, :-time_steps_to_drop]
 
+        # subsample before quantizer
+        if self.cfg.subsample == "fixed":
+            """fixed subsample"""
+            features = self.subsampler(features)
+            unmasked_features = self.subsampler(unmasked_features)
+        if self.cfg.subsample == "cif":
+            """cif subsample"""
+            origin_lengths = features.size(1) # FIXME temp solution for padding_mask = None
+
+            cif_out = self.cif_subsampler(features)
+            features = cif_out["cif_out"][0]
+            unmasked_features = self.cif_subsampler(unmasked_features)["cif_out"][0]
+
         if self.post_extract_proj is not None:
             features = self.post_extract_proj(features)
 
@@ -764,6 +794,11 @@ class Wav2Vec2Model(BaseFairseqModel):
             result["code_perplexity"] = code_ppl
             result["num_vars"] = num_vars
             result["temp"] = curr_temp
+
+        if self.cfg.subsample == "cif":
+            result["alpha_mean"] = (cif_out["alpha_sum"][0].detach() / origin_lengths).mean().item()
+            result["alpha_std"] = cif_out["alpha_std"][0].detach().mean().item()
+            # print(result["alpha_mean"], result["alpha_std"])
 
         return result
 
