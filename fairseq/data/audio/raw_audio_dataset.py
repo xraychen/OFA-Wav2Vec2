@@ -21,6 +21,7 @@ from fairseq.data.audio.audio_utils import (
     is_sf_audio_data,
 )
 from fairseq.data.text_compressor import TextCompressor, TextCompressionLevel
+from torch.nn.utils.rnn import pad_sequence
 
 
 logger = logging.getLogger(__name__)
@@ -258,6 +259,8 @@ class FileAudioDataset(RawAudioDataset):
         num_buckets=0,
         compute_mask_indices=False,
         text_compression_level=TextCompressionLevel.none,
+        alpha_root="",
+        boundaries_root="",
         **mask_compute_kwargs,
     ):
         super().__init__(
@@ -306,6 +309,9 @@ class FileAudioDataset(RawAudioDataset):
 
         self.set_bucket_info(num_buckets)
 
+        self.alpha_root = alpha_root
+        self.boundaries_root = boundaries_root
+
     def __getitem__(self, index):
         import soundfile as sf
 
@@ -323,7 +329,95 @@ class FileAudioDataset(RawAudioDataset):
 
         feats = torch.from_numpy(wav).float()
         feats = self.postprocess(feats, curr_sample_rate)
-        return {"id": index, "source": feats}
+        output = {"id": index, "source": feats}
+
+        # load alpha
+        if self.alpha_root != "":
+            alpha = torch.load(os.path.join(self.alpha_root, fn.split('.')[0] + '.pt'))
+            output.update({"alpha": alpha})
+
+        if self.boundaries_root != "":
+            boundaries = torch.load(os.path.join(self.boundaries_root, fn.split('.')[0] + '.pt'))
+            output.update({"boundaries": boundaries})
+
+        return output
+
+    def collater(self, samples):
+        samples = [s for s in samples if s["source"] is not None]
+        if len(samples) == 0:
+            return {}
+
+        sources = [s["source"] for s in samples]
+        sizes = [len(s) for s in sources]
+
+        if self.pad:
+            target_size = min(max(sizes), self.max_sample_size)
+        else:
+            target_size = min(min(sizes), self.max_sample_size)
+
+        collated_sources = sources[0].new_zeros(len(sources), target_size)
+        padding_mask = (
+            torch.BoolTensor(collated_sources.shape).fill_(False) if self.pad else None
+        )
+        for i, (source, size) in enumerate(zip(sources, sizes)):
+            diff = size - target_size
+            if diff == 0:
+                collated_sources[i] = source
+            elif diff < 0:
+                assert self.pad
+                collated_sources[i] = torch.cat(
+                    [source, source.new_full((-diff,), 0.0)]
+                )
+                padding_mask[i, diff:] = True
+            else:
+                collated_sources[i] = self.crop_to_max_size(source, target_size)
+
+        input = {"source": collated_sources}
+        out = {"id": torch.LongTensor([s["id"] for s in samples])}
+        if self.pad:
+            input["padding_mask"] = padding_mask
+
+        if hasattr(self, "num_buckets") and self.num_buckets > 0:
+            assert self.pad, "Cannot bucket without padding first."
+            bucket = max(self._bucketed_sizes[s["id"]] for s in samples)
+            num_pad = bucket - collated_sources.size(-1)
+            if num_pad:
+                input["source"] = self._bucket_tensor(collated_sources, num_pad, 0)
+                input["padding_mask"] = self._bucket_tensor(padding_mask, num_pad, True)
+
+        if self.compute_mask_indices:
+            B = input["source"].size(0)
+            T = self._get_mask_indices_dims(input["source"].size(-1))
+            padding_mask_reshaped = input["padding_mask"].clone()
+            extra = padding_mask_reshaped.size(1) % T
+            if extra > 0:
+                padding_mask_reshaped = padding_mask_reshaped[:, :-extra]
+            padding_mask_reshaped = padding_mask_reshaped.view(
+                padding_mask_reshaped.size(0), T, -1
+            )
+            padding_mask_reshaped = padding_mask_reshaped.all(-1)
+            input["padding_count"] = padding_mask_reshaped.sum(-1).max().item()
+            mask_indices, mask_channel_indices = self._compute_mask_indices(
+                (B, T, self._C),
+                padding_mask_reshaped,
+            )
+            input["mask_indices"] = mask_indices
+            input["mask_channel_indices"] = mask_channel_indices
+            out["sample_size"] = mask_indices.sum().item()
+
+        out["net_input"] = input
+
+        # load alpha
+        if self.alpha_root != "":
+            alpha = pad_sequence([e["alpha"] for e in samples], batch_first=True)
+            boundaries = pad_sequence([e["boundaries"] for e in samples], padding_value=-1, batch_first=True)
+            input["source"] = {
+                "source": input["source"],
+                "alpha": alpha,
+                "boundaries": boundaries
+            }
+
+        return out
 
 
 class BinarizedAudioDataset(RawAudioDataset):

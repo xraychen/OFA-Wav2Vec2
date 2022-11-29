@@ -64,5 +64,5 @@ model:
   card_loss: 0.0
   target_ratio: 0.25 # target ratio for card_loss
   # seg_loss and frame_loss
-  seg_loss: 5e-3
-  frame_loss: 0.25
+  seg_loss: 5e-2
+  frame_loss: 1.0

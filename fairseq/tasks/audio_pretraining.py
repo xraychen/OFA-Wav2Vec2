@@ -104,6 +104,9 @@ class AudioPretrainingConfig(FairseqDataclass):
             "target texts): none/low/high (default: none). "
         },
     )
+    # load alpha
+    alpha_root: str = field(default="")
+    boundaries_root: str = field(default="")
 
 
 @register_task("audio_pretraining", dataclass=AudioPretrainingConfig)
@@ -171,6 +174,8 @@ class AudioPretrainingTask(FairseqTask):
                 num_buckets=self.cfg.num_batch_buckets or int(self.cfg.tpu),
                 compute_mask_indices=(self.cfg.precompute_mask_indices or self.cfg.tpu),
                 text_compression_level=text_compression_level,
+                alpha_root=self.cfg.alpha_root,
+                boundaries_root=self.cfg.boundaries_root,
                 **self._get_mask_precompute_kwargs(task_cfg),
             )
 

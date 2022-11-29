@@ -125,6 +125,9 @@ class BaseFairseqModel(nn.Module):
         from fairseq.checkpoint_utils import prune_state_dict
 
         new_state_dict = prune_state_dict(state_dict, model_cfg)
+
+        # FIXME: hot fix for loading hubert model with different cluster num
+        # new_state_dict = {k: v for k, v in new_state_dict.items() if k not in ["label_embs_concat"]}
         return super().load_state_dict(new_state_dict, strict)
 
     def upgrade_state_dict(self, state_dict):

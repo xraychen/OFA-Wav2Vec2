@@ -568,7 +568,7 @@ class Trainer(object):
                 # self.model.load_state_dict(
                 #     state["model"], strict=True, model_cfg=self.cfg.model
                 # )
-                # change strict to False
+                # FIXME: change strict to False
                 self.model.load_state_dict(
                     state["model"], strict=False, model_cfg=self.cfg.model
                 )
@@ -857,14 +857,26 @@ class Trainer(object):
                         torch.cuda.empty_cache()
                     if self.cfg.distributed_training.distributed_world_size == 1:
                         return None
+                # TODO: check if error
+                elif "cannot reshape tensor of 0 elements" in str(e):
+                    logger.warning(str(e))
+                    self.zero_grad()
+                    if self.cuda:
+                        torch.cuda.empty_cache()
                 else:
                     raise e
-            except Exception:
-                self.consolidate_optimizer()
-                self.save_checkpoint(
-                    os.path.join(self.cfg.checkpoint.save_dir, "crash.pt"), {}
-                )
-                raise
+            except Exception as e:
+                if "invalid input size for negative sample" in str(e):
+                    logger.warning(str(e))
+                    self.zero_grad()
+                    if self.cuda:
+                        torch.cuda.empty_cache()
+                else:
+                    self.consolidate_optimizer()
+                    self.save_checkpoint(
+                        os.path.join(self.cfg.checkpoint.save_dir, "crash.pt"), {}
+                    )
+                    raise
 
             if self.tpu and i < len(samples) - 1:
                 # tpu-comment: every XLA operation before marking step is

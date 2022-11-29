@@ -293,8 +293,14 @@ class Wav2Vec2Config(FairseqDataclass):
     # Subsampling
     subsample: str = field(default="none", metadata={"help": "subsample method: none, fixed, cif"})
     fixed_subsample_ratio: int = field(default=4)
-    # use_cif: bool = field(default=False)
 
+    # card_loss
+    card_loss: float = field(default=-1)
+    target_ratio: float = field(default=0.25)
+
+    # seg_loss and frame_loss
+    seg_loss: float = field(default=-1)
+    frame_loss: float = field(default=-1)
 
 @register_model("wav2vec2", dataclass=Wav2Vec2Config)
 class Wav2Vec2Model(BaseFairseqModel):
@@ -510,7 +516,14 @@ class Wav2Vec2Model(BaseFairseqModel):
         cross_high = tsz * bsz
         high = tsz - (padding_count or 0)
         with torch.no_grad():
-            assert high > 1, f"{bsz,tsz,fsz}"
+            assert high > 1, f"{bsz,tsz,fsz}, invalid input size for negative sample"
+            # # FIXME: TEST assert
+            # import random
+            # assert random.random() > 0.5, f"{bsz,tsz,fsz}, invalid input size for negative sample"
+            # FIXME test runtime error
+            # import random
+            # if random.random() > 0.5:
+            #     raise RuntimeError("cannot reshape tensor of 0 elements into shape")
 
             if self.n_negatives > 0:
                 tszs = (
@@ -595,6 +608,15 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         return input_lengths.to(torch.long)
 
+    def _cal_cif_pad_mask(self, cif_lengths, max_len):
+        pad_mask = torch.ones(
+            (cif_lengths.size(0), max_len), dtype=torch.bool, device=cif_lengths.device
+        )
+        for idx in range(cif_lengths.size(0)):
+            pad_mask[idx, cif_lengths[idx] :] = 0
+
+        return pad_mask
+
     def forward(
         self,
         source,
@@ -606,6 +628,13 @@ class Wav2Vec2Model(BaseFairseqModel):
         mask_channel_indices=None,
         padding_count=None,
     ):
+
+        # print("source", source)
+        # raise
+        if type(source) is dict:
+            self.pseudo_alpha = source["alpha"]
+            self.boundaries = source["boundaries"]
+            source = source["source"]
 
         if self.feature_grad_mult > 0:
             features = self.feature_extractor(source)
@@ -662,6 +691,11 @@ class Wav2Vec2Model(BaseFairseqModel):
             features = cif_out["cif_out"][0]
             unmasked_features = self.cif_subsampler(unmasked_features)["cif_out"][0]
 
+            # TODO add padding mask
+            # print("Add padding mask!")
+            if padding_mask is not None:
+                padding_mask = self._cal_cif_pad_mask(cif_out["cif_lengths"][0], features.size(1))
+
         if self.post_extract_proj is not None:
             features = self.post_extract_proj(features)
 
@@ -702,6 +736,7 @@ class Wav2Vec2Model(BaseFairseqModel):
             y = unmasked_features
             mask_indices = None
 
+        padding_mask = None
         x, layer_results = self.encoder(x, padding_mask=padding_mask, layer=layer)
 
         if features_only:
@@ -796,9 +831,10 @@ class Wav2Vec2Model(BaseFairseqModel):
             result["temp"] = curr_temp
 
         if self.cfg.subsample == "cif":
-            result["alpha_mean"] = (cif_out["alpha_sum"][0].detach() / origin_lengths).mean().item()
+            result["alpha"] = cif_out["alpha"][0] # for computing loss
+
+            result["alpha_mean"] = (cif_out["alpha_sum"][0] / origin_lengths).mean()
             result["alpha_std"] = cif_out["alpha_std"][0].detach().mean().item()
-            # print(result["alpha_mean"], result["alpha_std"])
 
         return result
 
@@ -836,6 +872,51 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         if "features_pen" in net_output:
             pen.append(net_output["features_pen"])
+
+        # card loss
+        card_loss = torch.tensor(0.0)
+        if self.cfg.card_loss > 0:
+            target = torch.ones_like(net_output["alpha_mean"]) * self.cfg.target_ratio
+            card_loss = self.cfg.card_loss * F.l1_loss(net_output["alpha_mean"], target)
+
+        # pad alpha
+        if self.cfg.seg_loss > 0 or self.cfg.frame_loss > 0:
+            alpha = net_output["alpha"]
+            if net_output["alpha"].size(-1) < self.pseudo_alpha.size(-1):
+                pad = self.pseudo_alpha.size(-1) - net_output["alpha"].size(-1)
+                alpha = nn.functional.pad(net_output["alpha"], (0, pad))
+
+        # seg loss
+        seg_loss = torch.tensor(0.0)
+        if self.cfg.seg_loss > 0:
+            # alpha = net_output["alpha"]
+            boundaries = self.boundaries
+
+            boundaries_mask = (boundaries < 0)
+            boundaries = boundaries - 1
+
+            csum = alpha.cumsum(dim=-1)
+            b = torch.zeros_like(boundaries, dtype=csum.dtype, device=csum.device)
+            for i in range(b.size(0)):
+                b[i, :] = csum[i][boundaries[i]]
+
+            t = torch.arange(1, b.size(1) + 1, device=b.device)
+            t = t.unsqueeze(0).repeat(b.size(0), 1)
+            b[boundaries_mask] = 0 # remove padding
+            t[boundaries_mask] = 0 # remove padding
+
+            seg_loss = self.cfg.seg_loss * F.l1_loss(b, t)
+
+        # frame loss
+        frame_loss = torch.tensor(0.0)
+        if self.cfg.frame_loss > 0:
+            # alpha = net_output["alpha"]
+            # assert abs(alpha.size(-1) - self.pseudo_alpha.size(-1)) < 3
+
+            min_len = min(alpha.size(-1), self.pseudo_alpha.size(-1))
+            frame_loss = self.cfg.frame_loss * F.l1_loss(alpha[:, :min_len], self.pseudo_alpha[:, :min_len])
+
+        pen.extend([card_loss, seg_loss, frame_loss])
 
         return pen
 

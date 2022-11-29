@@ -58,7 +58,8 @@ def cif_function(
     target_lengths: Optional[Tensor] = None,
     eps: float = 1e-4,
     cal_reverse_alpha = False,
-    is_training = True
+    is_training = True,
+    protect_alpha = True,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     r""" A fast parallel implementation of continuous integrate-and-fire (CIF)
     https://arxiv.org/abs/1905.11235
@@ -109,6 +110,20 @@ def cif_function(
     else:
         alpha_sum = alpha.sum(dim=1)
         alpha_std = alpha.std(dim=1)
+
+        if protect_alpha:
+            # minimum fire num (negative sample needs sample num > 1)
+            min_fire_num = 2
+
+            temp = alpha_sum < min_fire_num # negative sameple needs sample num > 1
+            if True in temp:
+                desired_sum = alpha_sum
+                desired_sum[temp] = min_fire_num + eps # negative sameple needs sample num > 1
+                alpha = alpha * (desired_sum / alpha_sum).unsqueeze(1)
+
+                alpha_sum = alpha.sum(dim=1)
+                alpha_std = alpha.std(dim=1)
+
         feat_lengths = (alpha_sum / beta).floor().long()
         T = feat_lengths.max()
 
