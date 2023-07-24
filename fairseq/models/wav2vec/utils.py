@@ -7,6 +7,7 @@ import math
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
+import numpy as np
 
 from .cif import cif_function
 
@@ -73,26 +74,118 @@ class AlphaModule(nn.Module):
 
 
 class CIF(nn.Module):
-    def __init__(self, embed_dim=512, beta=1.0, layer_type='cnn', conv_width=5):
+    def __init__(
+        self,
+        embed_dim=512,
+        beta=1.0,
+        layer_type="cnn",
+        conv_width=5,
+        mixup=False,
+        mixup_a=1.0,
+        mixup_distro="uniform",
+        upper_lambd=2.0,
+    ):
         super().__init__()
 
         self.alpha_fn = AlphaModule(layer_type, embed_dim, conv_width)
         self.beta = beta
+        self.mixup = mixup
+        self.mixup_a = mixup_a  # parameter for beta distribution
+        self.mixup_distro = mixup_distro
+        self.upper_lambd = upper_lambd
+        if self.upper_lambd == 2.0:
+            self.upper_lambd -= 1e-5 # to prevent zero alphas
 
-    def forward(self, x, pad_mask=None, target_lengths=None, gamma=0.0, is_training=True):
+        print(f"mixup_distro: {mixup_distro}, upper_lambd: {self.upper_lambd}")
+
+    def forward(
+        self,
+        x,
+        pad_mask=None,
+        target_lengths=None,
+        gamma=0.0,
+        is_training=True,
+        overwrite_alpha=None,
+        overwrite_lambd=None,
+    ):
         """
-            (1 - gamma) * target_len + gamma * predicted_alpha.
+        (1 - gamma) * target_len + gamma * predicted_alpha.
         """
-        alpha = self.alpha_fn(x)
+        if overwrite_alpha is None:
+            alpha = self.alpha_fn(x)
+            if self.mixup:
+                if overwrite_lambd is None:
+                    if self.mixup_distro == "uniform":
+                        lambd = np.random.beta(self.mixup_a, self.mixup_a)
+                    elif self.mixup_distro == "uniform-fr":
+                        fr = np.random.beta(1.0, 1.0) * 70 + 20 # uniform from 20ms to 90 ms
+                        lambd = 9 / 7 * (1 - 20 / fr)
+                    elif self.mixup_distro == "scale":
+                        lambd = np.random.beta(self.mixup_a, self.mixup_a) + 1 # from 1 to 2
+                    elif self.mixup_distro == "both":
+                        lambd = np.random.beta(1.0, 1.0) * self.upper_lambd
+                    else:
+                        raise NotImplementedError
+                else:
+                    lambd = overwrite_lambd
+
+                ones = torch.ones_like(alpha)
+
+                if type(lambd) is not torch.Tensor:
+                    # this will break gradient
+                    lambd = torch.tensor(lambd).to(alpha.device)
+
+                mixed_alpha = lambd * alpha + (1.0 - lambd) * ones
+
+                weight_1 = F.relu(1 - lambd)
+                weight_2 = F.relu(lambd) - 2 * F.relu(lambd - 1)
+                mixed_alpha = weight_1 * ones + weight_2 * alpha
+
+            else:
+                mixed_alpha = None
+        else:
+            lambd = None
+            mixed_alpha = None
+            alpha = overwrite_alpha.to(x.device)
+
         padding_mask = torch.logical_not(pad_mask) if pad_mask is not None else None
         out = cif_function(
             x,
-            alpha,
+            alpha if mixed_alpha is None else mixed_alpha,
             beta=self.beta,
             gamma=gamma,
             padding_mask=padding_mask,
             target_lengths=target_lengths,
-            is_training=is_training
+            is_training=is_training,
         )
 
-        return out
+        # print(f"lambda = {lambd}, length = {out['cif_lengths'][0].float().mean()} / {x.size(1)} = {out['cif_lengths'][0].float().mean() / x.size(1)}")
+
+        return out, alpha
+
+
+
+# class CIF(nn.Module):
+#     def __init__(self, embed_dim=512, beta=1.0, layer_type='cnn', conv_width=5):
+#         super().__init__()
+
+#         self.alpha_fn = AlphaModule(layer_type, embed_dim, conv_width)
+#         self.beta = beta
+
+#     def forward(self, x, pad_mask=None, target_lengths=None, gamma=0.0, is_training=True):
+#         """
+#             (1 - gamma) * target_len + gamma * predicted_alpha.
+#         """
+#         alpha = self.alpha_fn(x)
+#         padding_mask = torch.logical_not(pad_mask) if pad_mask is not None else None
+#         out = cif_function(
+#             x,
+#             alpha,
+#             beta=self.beta,
+#             gamma=gamma,
+#             padding_mask=padding_mask,
+#             target_lengths=target_lengths,
+#             is_training=is_training
+#         )
+
+#         return out

@@ -302,6 +302,11 @@ class Wav2Vec2Config(FairseqDataclass):
     seg_loss: float = field(default=-1)
     frame_loss: float = field(default=-1)
 
+    # OFA: mixup alpha
+    mixup: bool = field(default=False)
+    mixup_distro: str = field(default="uniform")
+    upper_lambd: float = field(default=2.0)
+
 @register_model("wav2vec2", dataclass=Wav2Vec2Config)
 class Wav2Vec2Model(BaseFairseqModel):
     def __init__(self, cfg: Wav2Vec2Config):
@@ -365,7 +370,11 @@ class Wav2Vec2Model(BaseFairseqModel):
             self.subsampler = Subsampler()
         elif cfg.subsample == "cif":
             self.subsampler = None
-            self.cif_subsampler = CIF()
+            self.cif_subsampler = CIF(
+                mixup=cfg.mixup,
+                mixup_distro=cfg.mixup_distro,
+                upper_lambd=cfg.upper_lambd,
+            )
         else:
             raise NotImplementedError
 
@@ -422,6 +431,9 @@ class Wav2Vec2Model(BaseFairseqModel):
             )
 
         self.final_proj = nn.Linear(cfg.encoder_embed_dim, final_dim)
+
+        # overwrite lambda at inference
+        self.overwrite_lambd = None
 
     def upgrade_state_dict_named(self, state_dict, name):
         super().upgrade_state_dict_named(state_dict, name)
@@ -687,9 +699,16 @@ class Wav2Vec2Model(BaseFairseqModel):
             """cif subsample"""
             origin_lengths = features.size(1) # FIXME temp solution for padding_mask = None
 
-            cif_out = self.cif_subsampler(features)
+            cif_out, alpha_origin = self.cif_subsampler(
+                features,
+                overwrite_lambd=self.overwrite_lambd,
+            )
             features = cif_out["cif_out"][0]
-            unmasked_features = self.cif_subsampler(unmasked_features)["cif_out"][0]
+
+            unmasked_features = self.cif_subsampler(
+                unmasked_features,
+                overwrite_alpha=cif_out["alpha"][0],
+            )[0]["cif_out"][0]
 
             # TODO add padding mask
             # print("Add padding mask!")
@@ -831,7 +850,8 @@ class Wav2Vec2Model(BaseFairseqModel):
             result["temp"] = curr_temp
 
         if self.cfg.subsample == "cif":
-            result["alpha"] = cif_out["alpha"][0] # for computing loss
+            # result["alpha"] = cif_out["alpha"][0] # for computing loss
+            result["alpha"] = alpha_origin # for computing loss; fix for OFA setting
 
             result["alpha_mean"] = (cif_out["alpha_sum"][0] / origin_lengths).mean()
             result["alpha_std"] = cif_out["alpha_std"][0].detach().mean().item()

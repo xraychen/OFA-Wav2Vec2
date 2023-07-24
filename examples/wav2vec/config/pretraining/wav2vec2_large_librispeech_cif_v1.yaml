@@ -13,9 +13,11 @@ checkpoint:
 task:
   _name: audio_pretraining
   data: ???
-  max_sample_size: 320000
+  # max_sample_size: 320000
   min_sample_size: 32000
   normalize: true
+  alpha_root: /livingrooms/ray_chen/w2vu_pseudo_alpha/alpha
+  boundaries_root: /livingrooms/ray_chen/w2vu_pseudo_alpha/boundaries
 
 dataset:
   batch_size: 4
@@ -30,11 +32,11 @@ distributed_training:
 criterion:
   _name: wav2vec
   infonce: true
-  log_keys: ["prob_perplexity","code_perplexity","temp"]
-  loss_weights: [0.1, 0]
+  log_keys: ["prob_perplexity","code_perplexity","temp","alpha_mean","alpha_std"]
+  loss_weights: [0.1, 0, 1.0, 1.0, 1.0] # _, _, card_loss, seg_loss, frame_loss
 
 optimization:
-  max_update: 1000000
+  max_update: 40000
   lr: [0.005]
 
 optimizer:
@@ -53,6 +55,7 @@ model:
   extractor_mode: layer_norm
   layer_norm_first: true
   final_dim: 768
+  mask_length: 3
   latent_temp: [2.0,0.1,0.999995]
   encoder_layerdrop: 0.00
   dropout_input: 0.0
@@ -67,3 +70,8 @@ model:
   encoder_attention_heads: 16
 
   feature_grad_mult: 1.0
+  # cif
+  subsample: cif # none, fixed, cif
+  card_loss: 0.0
+  seg_loss: 5e-2
+  frame_loss: 0.5
