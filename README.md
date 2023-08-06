@@ -12,16 +12,16 @@ This is the Wav2Vec 2.0 version for the paper: [Once-for-All Sequence Compressio
 2. Run the following command to pre-train OFA sequence compression Wav2Vec 2.0 model:
 ```
 fairseq-hydra-train \
-	task.data=/livingrooms/ray_chen/manifest/LS960 \
-	checkpoint.save_dir=base-continual-ofa-v1-inter \
-	checkpoint.save_interval_updates=1000 \
-	checkpoint.keep_interval_updates=30 \
-	checkpoint.restore_file=/livingrooms/ray_chen/fairseq-ckpt/wav2vec2_base.pt \
-	checkpoint.reset_optimizer=True \
-	distributed_training.distributed_world_size=1 \
-	+optimization.update_freq='[64]' \
-	--config-dir examples/wav2vec/config/pretraining \
-	--config-name wav2vec2_base_librispeech_ofa_v1 \
+    task.data=/livingrooms/ray_chen/manifest/LS960 \
+    checkpoint.save_dir=base-continual-ofa-v1-inter \
+    checkpoint.save_interval_updates=1000 \
+    checkpoint.keep_interval_updates=30 \
+    checkpoint.restore_file=/livingrooms/ray_chen/fairseq-ckpt/wav2vec2_base.pt \
+    checkpoint.reset_optimizer=True \
+    distributed_training.distributed_world_size=1 \
+    +optimization.update_freq='[64]' \
+    --config-dir examples/wav2vec/config/pretraining \
+    --config-name wav2vec2_base_librispeech_ofa_v1 \
 ```
 
 You can find the pre-trained checkpoint here.
@@ -36,7 +36,14 @@ Follow the instruction in the [repo](https://github.com/xraychen/OFA-Sequence-Co
 
 To change compressing rate, simply specify the arg `--lambd`, please refers to the paper for more details. For example, the following command evaluate the model on Phone Recognition with `lambd=0.5`.
 ```
-python3 run_downstream.py -n ExpName -m train -u wav2vec2_local -k /path/to/pre-train/ckpt -d ctc -c downstream/ctc/libriphone.yaml --lambd 0.5
+python3 run_downstream.py \
+     -n ExpName \
+     -m train \
+     -u wav2vec2_local \
+     -k /path/to/pre-train/ckpt \
+     -d ctc \
+     -c downstream/ctc/libriphone.yaml \
+     --lambd 0.5 \
 ```
 
 ## Ciatation
