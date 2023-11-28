@@ -30,7 +30,42 @@ You can find the pre-trained checkpoint here.
 | [OFA 20-90ms](examples/wav2vec/config/pretraining/wav2vec2_base_librispeech_ofa_v1.yaml)  | [Link](https://www.dropbox.com/scl/fi/s7tzmz5h019dcg5seqlu0/checkpoint_582_5000.pt?rlkey=ymieopv1jyl1jgf5zubws8hv0&dl=1) |
 
 
-## Evaluation
+## Extract Feature from a Pre-trained Model
+
+```python
+import torch
+from fairseq import checkpoint_utils
+
+
+# load model from ckpt
+ckpt = "/path/to/ckpt.pt"
+models, _, _ = checkpoint_utils.load_model_ensemble_and_task([ckpt])
+model = models[0].eval()
+
+# overwrite model's lambd value
+model.overwrite_lambd = 0.7
+
+# load wav input
+wav_input_16khz = torch.ones(1, 16000 * 10)
+
+# construct inputs
+feats = wav_input_16khz.view(1, -1)
+padding_mask = torch.BoolTensor(feats.shape).fill_(False)
+inputs = {
+    "source": feats,
+    "padding_mask": padding_mask,
+    "layer": 9,
+}
+
+# extract feature
+with torch.no_grad():
+    out = model.extract_features(**inputs)
+    feat = out["x"]
+    print(feat.size())
+```
+
+
+<!-- ## Evaluation
 Follow the instruction in the [repo](https://github.com/xraychen/OFA-Sequence-Compression) to evaluate on SUPERB downstream tasks.
 
 
@@ -44,7 +79,7 @@ python3 run_downstream.py \
      -d ctc \
      -c downstream/ctc/libriphone.yaml \
      --lambd 0.5 \
-```
+``` -->
 
 ## Ciatation
 If you find the code helpful, please consider citing our paper!
