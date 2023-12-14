@@ -206,6 +206,8 @@ def do_setup(package_data):
             'numpy; python_version>="3.7"',
             "regex",
             "sacrebleu>=1.4.12",
+            "importlib-resources<=5.12",
+            "soundfile",
             "torch",
             "tqdm",
             "bitarray",
