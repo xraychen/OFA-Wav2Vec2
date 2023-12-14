@@ -5,7 +5,9 @@ This repository implements once-for-all sequence compression (ICASSP 2023) on Wa
 - Paper link: https://ieeexplore.ieee.org/abstract/document/10095025
 
 ## Enviromental Setup
-This repository is modified from the original implementation of Wav2Vec 2.0 in the [fairseq toolkit](). To set up the environment, clone and install this repository with the following commands (tested under `python 3.8` and `torch 2.0.1`).
+This repository is modified from the original implementation of Wav2Vec 2.0 in the [fairseq toolkit]().
+
+To set up the environment, clone and install this repository with the following commands (tested under `python 3.8` and `torch 2.0.1`).
 ```bash
 git clone https://github.com/xraychen/OFA-Wav2Vec2
 cd OFA-Wav2Vec2 && pip install -e .
