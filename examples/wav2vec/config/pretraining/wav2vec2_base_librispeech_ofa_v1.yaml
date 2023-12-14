@@ -17,8 +17,8 @@ task:
   min_sample_size: 32000
   normalize: false
   # load alpha
-  alpha_root: /livingrooms/ray_chen/w2vu_pseudo_alpha/alpha
-  boundaries_root: /livingrooms/ray_chen/w2vu_pseudo_alpha/boundaries
+  alpha_root: ???
+  boundaries_root: ???
 
 dataset:
   num_workers: 6

@@ -5,19 +5,30 @@ This repository implements once-for-all sequence compression (ICASSP 2023) on Wa
 - Paper link: https://ieeexplore.ieee.org/abstract/document/10095025
 
 ## Enviromental Setup
-This repo is modified from the original implementation of Wav2Vec 2.0 in the [fairseq toolkit](). To set up the environment, clone and install this repo with the following commands.
+This repository is modified from the original implementation of Wav2Vec 2.0 in the [fairseq toolkit](). To set up the environment, clone and install this repository with the following commands.
 ```bash
 git clone https://github.com/xraychen/OFA-Wav2Vec2
 cd OFA-Wav2Vec2 && pip install -e .
 ```
 
 ## Pre-train an OFA Wav2Vec 2.0
-1. Prepare the training data manifest for LibriSpeech 960hr following the [instruction](https://github.com/facebookresearch/fairseq/tree/main/examples/wav2vec#prepare-training-data-manifest).
+1. Download the [LibriSpeech](https://www.openslr.org/12) and prepare the folder structure as follow.
+```
+LibriSpeech
+├── train-clean-100
+├── train-clean-360
+├── train-other-500
+└── dev-clean
+```
+2. Prepare the training data manifest for LibriSpeech 960hr following the [instruction](https://github.com/facebookresearch/fairseq/tree/main/examples/wav2vec#prepare-training-data-manifest).
 ```bash
 pip install soundfile
-python3 examples/wav2vec/wav2vec_manifest.py </path/to/LS960> --dest </path/to/manifest> --ext $ext --valid-percent $valid
+python3 examples/wav2vec/wav2vec_manifest.py </path/to/LS960> \
+    --dest </path/to/manifest> \
+    --ext $ext \
+    --valid-percent $valid \
 ```
-2. Download the pre-extracted UASR segmentation of LibriSpeech 960hr from [here](https://www.dropbox.com/scl/fi/apwwgcftz6649e389tcrh/hubert_pseudo_alpha_w2vu.tar.gz?rlkey=ioz2hu867jom4m5pjtxjz1dja&dl=1) and you should get the following folder structure.
+3. Download the pre-extracted UASR segmentation of LibriSpeech 960hr from [here](https://www.dropbox.com/scl/fi/apwwgcftz6649e389tcrh/hubert_pseudo_alpha_w2vu.tar.gz?rlkey=ioz2hu867jom4m5pjtxjz1dja&dl=1) and you should get the following folder structure.
 ```
 hubert_pseudo_alpha_w2vu
 ├── alpha
@@ -31,8 +42,8 @@ hubert_pseudo_alpha_w2vu
     ├── train-other-500
     └── dev-clean
 ```
-3. Download the Wav2Vec 2.0 Base trained on 960hr Librispeech checkpoint from [fairseq](https://github.com/facebookresearch/fairseq/tree/main/examples/wav2vec#pre-trained-models).
-4. Run the following command to train an OFA sequence compression Wav2Vec 2.0 model.
+4. Download the Wav2Vec 2.0 Base trained on 960hr Librispeech checkpoint from [fairseq](https://github.com/facebookresearch/fairseq/tree/main/examples/wav2vec#pre-trained-models).
+5. Run the following command to train an OFA sequence compression Wav2Vec 2.0 model.
 ```bash
 fairseq-hydra-train \
     task.data=</path/to/manifest> \
